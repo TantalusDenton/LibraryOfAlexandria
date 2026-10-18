@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: alexandria
+      POSTGRES_USER: alexandria
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alexandria"]
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: ["redis:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+  migrate:
+    build: ./backend
+    image: alexandria-backend:local
+    env_file: .env
+    environment: &backend-env
+      DATABASE_URL: postgresql+psycopg://alexandria:${POSTGRES_PASSWORD}@postgres/alexandria
+      CHECKPOINT_URL: postgresql://alexandria:${POSTGRES_PASSWORD}@postgres/alexandria
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /app/data
+    command: .venv/bin/alembic upgrade head
+    volumes: ["objects:/app/data"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    build: ./backend
+    image: alexandria-backend:local
+    env_file: .env
+    environment: *backend-env
+    volumes: ["objects:/app/data"]
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  worker:
+    build: ./backend
+    image: alexandria-backend:local
+    env_file: .env
+    environment: *backend-env
+    volumes: ["objects:/app/data"]
+    command: .venv/bin/python -m app.worker
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  web:
+    build: ./frontend
+    image: alexandria-web:local
+    environment:
+      API_URL: http://api:8000
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [api]
+volumes:
+  postgres:
+  redis:
+  objects:
