@@ -3,21 +3,30 @@ import { randomUUID } from "node:crypto";
 
 test("publisher completes an offline illustrated edition in the browser", async ({
   page,
-  request,
 }) => {
   const errors: string[] = [];
+  const jobTimeout = process.env.STUDIO_URL ? 180000 : 30000;
+  const ownerEmail = process.env.STUDIO_EMAIL;
+  const ownerPassword = process.env.STUDIO_PASSWORD;
+  const bookTitle = ownerEmail ? `Deployment proof ${randomUUID().slice(0, 8)}` : "Ivanhoe";
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/projects/*/source/upload", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
   await page.goto("/");
   await page
     .getByLabel("Email address")
-    .fill(`browser-${randomUUID()}@example.org`);
-  await page.getByLabel("Password").fill(randomUUID() + randomUUID());
+    .fill(ownerEmail || `browser-${randomUUID()}@example.org`);
+  await page.getByLabel("Password").fill(ownerPassword || randomUUID() + randomUUID());
+  if (ownerEmail) await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
-    .getByRole("button", { name: "Create your studio", exact: true })
+    .getByRole("button", { name: ownerEmail ? "Enter your studio" : "Create your studio", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "A library of possibilities." }),
   ).toBeVisible();
+  expect(await page.evaluate(async () => (await (await fetch("/api/settings")).json()).ai_mode)).toBe("offline");
   await page.screenshot({
     path: "test-results/dashboard-desktop.png",
     fullPage: true,
@@ -26,7 +35,7 @@ test("publisher completes an offline illustrated edition in the browser", async 
     .getByRole("button", { name: "Create a book", exact: true })
     .first()
     .click();
-  await page.getByLabel("Book title", { exact: true }).fill("Ivanhoe");
+  await page.getByLabel("Book title", { exact: true }).fill(bookTitle);
   await page
     .getByLabel("Original author", { exact: true })
     .fill("Sir Walter Scott");
@@ -47,12 +56,12 @@ test("publisher completes an offline illustrated edition in the browser", async 
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "Create my book" }).click();
   await expect(
-    page.getByRole("heading", { name: "Ivanhoe", exact: true }),
-  ).toBeVisible();
+    page.getByRole("heading", { name: bookTitle, exact: true }),
+  ).toBeVisible({ timeout: jobTimeout });
   await page.getByRole("button", { name: "Analyze manuscript" }).click();
   await expect(page.locator(".job-info strong")).toHaveText(
     "generate character references",
-    { timeout: 30000 },
+    { timeout: jobTimeout },
   );
   await expect(page.locator(".job-info .badge")).toHaveText("review");
   await page.locator(".chapter-card>summary").click();
@@ -61,7 +70,7 @@ test("publisher completes an offline illustrated edition in the browser", async 
     .getByRole("button", { name: "Authorize batch & continue" })
     .click();
   await expect(page.locator(".job-info strong")).toHaveText("plan pages", {
-    timeout: 30000,
+    timeout: jobTimeout,
   });
   await expect(page.locator(".job-info .badge")).toHaveText("review");
   await page.getByRole("tab", { name: /Character Studio/ }).click();
@@ -84,7 +93,7 @@ test("publisher completes an offline illustrated edition in the browser", async 
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.locator(".job-info strong")).toHaveText(
     "generate page art",
-    { timeout: 30000 },
+    { timeout: jobTimeout },
   );
   await page.getByRole("tab", { name: "Book Editor" }).click();
   await expect(
@@ -106,7 +115,7 @@ test("publisher completes an offline illustrated edition in the browser", async 
     .getByRole("button", { name: "Authorize batch & continue" })
     .click();
   await expect(page.locator(".job-info strong")).toHaveText("export pdf", {
-    timeout: 30000,
+    timeout: jobTimeout,
   });
   await expect(page.locator(".page-canvas>img")).toBeVisible();
   for (let i = 0; i < 2; i++) {
@@ -128,7 +137,7 @@ test("publisher completes an offline illustrated edition in the browser", async 
   await page.getByRole("tab", { name: "Cover & print" }).click();
   await page.getByRole("button", { name: "Generate cover art" }).click();
   await expect(page.locator(".cover-preview>img")).toBeVisible({
-    timeout: 30000,
+    timeout: jobTimeout,
   });
   await page.getByLabel("Approve cover artwork").check();
   await page.getByRole("button", { name: "Save cover", exact: true }).click();
@@ -141,14 +150,18 @@ test("publisher completes an offline illustrated edition in the browser", async 
     page.getByText("OFFLINE TEST ART: these proofs must not be published"),
   ).toBeVisible();
   const download = page.getByRole("link", { name: /Complete package/ });
-  const result = await page.request.get((await download.getAttribute("href"))!);
-  expect(result.status()).toBe(200);
-  expect(result.headers()["content-type"]).toContain("zip");
+  const result = await page.evaluate(async (href) => {
+    const response = await fetch(href);
+    return { status: response.status, type: response.headers.get("content-type"), bytes: (await response.arrayBuffer()).byteLength };
+  }, (await download.getAttribute("href"))!);
+  expect(result.status).toBe(200);
+  expect(result.type).toContain("zip");
+  expect(result.bytes).toBeGreaterThan(0);
   await page.reload();
   await page
-    .getByRole("button", { name: "Ivanhoe", exact: false })
+    .getByRole("button", { name: bookTitle, exact: false })
     .filter({
-      has: page.getByRole("heading", { name: "Ivanhoe", exact: true }),
+      has: page.getByRole("heading", { name: bookTitle, exact: true }),
     })
     .click();
   await page.getByRole("tab", { name: "Character Studio" }).click();
@@ -170,9 +183,9 @@ test("publisher completes an offline illustrated edition in the browser", async 
     fullPage: true,
   });
   await page
-    .getByRole("button", { name: "Ivanhoe", exact: false })
+    .getByRole("button", { name: bookTitle, exact: false })
     .filter({
-      has: page.getByRole("heading", { name: "Ivanhoe", exact: true }),
+      has: page.getByRole("heading", { name: bookTitle, exact: true }),
     })
     .click();
   await page.getByRole("tab", { name: "Book Editor" }).click();

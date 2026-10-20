@@ -48,6 +48,8 @@ Build containers need DNS and access to PyPI and npm. If a managed cloud uses an
 
 ## Use the studio
 
+For the Azure Consumption deployment with private PostgreSQL, Blob Storage, managed identities, and scale-to-zero container jobs, see [the Azure deployment guide](deploy/azure/README.md). The deployment command keeps AI offline, disables public registration, creates an initial owner account, and configures budget alerts. Azure access and subscription-side validation are required before it can be considered deployed.
+
 1. **Create a book.** Enter the title, original author, source edition, original/output languages, audience, tone, format, 1–5 pages per original chapter, style, trim, paper, quality, models, and budget. Upload TXT or import a public HTTP(S) source. Confirm rights in the intended publishing markets and record the basis. The Ivanhoe preset supplies Scott’s title, a Gutenberg URL, and the requested gothic medieval art direction; it supplies no copyrighted modern illustrations.
 2. **Analyze.** Chapters retain character offsets into the complete saved, normalized source document. Unheaded text is divided at paragraphs. Chapter chunks, intermediate hierarchy levels, complete-story analysis, character evidence, and page plans are persisted. The event ledger and cast from source chunks are retained independently of compressed summaries.
 3. **Review summaries.** Edit summaries and essential-event flags before approving them. Each page plan must map every essential event to a page. Source passages remain accessible in the editor. Summary revisions after pages are planned require corresponding page-script edits; they do not silently destroy an existing book.
@@ -105,8 +107,8 @@ The default font is DejaVu Sans when available, otherwise bundled Bitstream Vera
 ```text
 Next.js studio → same-origin streaming API proxy → FastAPI
                                                    ├─ SQLAlchemy / Alembic → PostgreSQL (or local SQLite)
-                                                   ├─ content-addressed storage → S3 (or local files)
-                                                   └─ Redis RQ → worker supervisor → LangGraph
+                                                   ├─ content-addressed storage → S3, Azure Blob, or local files
+                                                   └─ database / Redis RQ / Azure Queue → workers → LangGraph
                                                                                      ├─ persisted checkpoints
                                                                                      ├─ structured OpenAI analysis
                                                                                      ├─ reference-based image generation
@@ -117,7 +119,7 @@ Workflow order is `ingest_source → detect_chapters → summarize_chapters → 
 
 All requested entities have relational tables, foreign keys, timestamps, and appropriate lookup/uniqueness constraints: User, BookProject, SourceDocument, Chapter, ChapterSummary, Character, CharacterReference, Location, StylePreset, Page, PagePanel, PageScript, PageArtwork, PageLayoutElement, GenerationJob, GenerationArtifact, WorkflowCheckpoint, UsageRecord, Export, QualityReport. Prompt versions, editor revisions, and immutable reference/art versions are stored. LangGraph’s SQLite/PostgreSQL checkpointer tables retain graph execution state separately from the domain checkpoints. The initial Alembic migration is an explicit immutable schema snapshot.
 
-`DATABASE_URL` accepts SQLAlchemy PostgreSQL URLs; `CHECKPOINT_URL` accepts native psycopg PostgreSQL connection strings. Run `alembic upgrade head` before API or worker startup. Local workers poll durable database jobs; deployed workers use Redis RQ with database-authoritative redispatch. PostgreSQL advisory locks (or local file locks) prevent concurrent work on a project. Scale Redis workers across processes for independent projects. Keep SQLite to a single local worker.
+`DATABASE_URL` accepts SQLAlchemy PostgreSQL URLs; `CHECKPOINT_URL` accepts native psycopg PostgreSQL connection strings. Run `alembic upgrade head` before API or worker startup. Local workers poll durable database jobs; Compose workers use Redis RQ with database-authoritative redispatch. Azure uses Storage Queue, one-shot Container Apps Jobs, and scheduled recovery, so idle worker services are unnecessary. PostgreSQL advisory locks (or local file locks) prevent concurrent work on a project. Scale Redis workers across processes for independent projects. Keep SQLite to a single local worker.
 
 For S3, set `STORAGE_BACKEND=s3`, `S3_BUCKET`, `S3_REGION`, and optionally `S3_ENDPOINT_URL`. Use the standard AWS credential chain or workload identity. Provision the bucket first and grant only necessary object read/write permissions. Storage keys are content-addressed, scoped to project IDs, and never derived from uploaded filenames. The S3 adapter is covered by a mocked transport contract test; an external bucket was not provisioned during implementation.
 
@@ -144,4 +146,4 @@ Optional actual PostgreSQL/Redis validation uses `tests/runtime_validation.py`: 
 
 ## Current verification
 
-The implementation was exercised with 33 passing backend tests, successful Next.js type checking/production builds, passing Chromium acceptance tests in local mode and the complete Docker Compose stack, actual PostgreSQL/Redis RQ delivery/checkpoint persistence, and the 1.1-million-character Gutenberg Ivanhoe source (44 numbered chapters plus opening material). Paid generation and live S3 were not exercised. Direct source URL ingestion was blocked by this cloud runtime’s public-DNS restriction; TXT ingestion and authenticated Git retrieval of the public-domain source were verified. Docker packaging verification is documented in `VALIDATION.md`.
+The implementation was exercised with 42 passing backend tests, successful Next.js type checking/production builds, passing Chromium acceptance tests in local mode and the complete Docker Compose stack, actual PostgreSQL/Redis RQ delivery/checkpoint persistence, and the 1.1-million-character Gutenberg Ivanhoe source (44 numbered chapters plus opening material). The Azure deployment also passed the full hosted browser workflow against real PostgreSQL, managed-identity Blob Storage, and queue-triggered container jobs. Paid generation and live S3 were not exercised. Direct source URL ingestion was blocked by this cloud runtime’s public-DNS restriction; TXT ingestion and authenticated Git retrieval of the public-domain source were verified. Docker packaging verification is documented in `VALIDATION.md`.

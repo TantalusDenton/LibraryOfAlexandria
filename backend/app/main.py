@@ -85,7 +85,7 @@ def start_job(db, project, kind="workflow", target_id=None):
         enqueue(job.id)
     except Exception:
         # Database is authoritative: worker supervisor redelivers after Redis is restored.
-        logger.warning("redis_dispatch_deferred", extra={"job_id": job.id})
+        logger.warning("queue_dispatch_deferred", extra={"job_id": job.id})
     return serialize(job)
 
 
@@ -166,12 +166,16 @@ def health(db: Session = Depends(get_db)):
     return {
         "status": "ok",
         "ai_mode": settings().ai_mode,
-        "queue": "redis" if settings().redis_url else "local-database",
+        "queue": "azure-storage" if settings().azure_queue_url else (
+            "redis" if settings().redis_url else "local-database"
+        ),
     }
 
 
 @app.post("/auth/register", status_code=201)
 def register(body: Credentials, response: Response, db: Session = Depends(get_db)):
+    if not settings().registration_enabled:
+        raise HTTPException(403, "Public registration is disabled")
     user = m.User(email=body.email.lower(), password_hash=password_hasher.hash(body.password))
     db.add(user)
     try:
@@ -239,7 +243,7 @@ def system_settings(user=Depends(current_user)):
         "preview_image_ceiling": cfg.preview_image_reservation_usd,
         "final_image_ceiling": cfg.final_image_reservation_usd,
         "storage": cfg.storage_backend,
-        "queue": "redis" if cfg.redis_url else "local-database",
+        "queue": "azure-storage" if cfg.azure_queue_url else ("redis" if cfg.redis_url else "local-database"),
     }
 
 
@@ -952,7 +956,7 @@ def job_control(
         try:
             enqueue(job.id)
         except Exception:
-            logger.warning("redis_dispatch_deferred", extra={"job_id": job.id})
+            logger.warning("queue_dispatch_deferred", extra={"job_id": job.id})
     return serialize(job)
 
 

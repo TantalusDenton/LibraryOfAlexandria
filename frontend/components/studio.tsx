@@ -204,6 +204,9 @@ export default function Studio() {
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
+  const hasActiveJob = Boolean(
+    book?.jobs.some((job) => job.status === "queued" || job.status === "running"),
+  );
   const refresh = useCallback(async () => {
     const [list, config] = await Promise.all([
       api<Project[]>("/projects"),
@@ -224,14 +227,28 @@ export default function Studio() {
   }, [user, refresh]);
   useEffect(() => {
     if (!selected || !user) return;
-    const source = new EventSource(`/api/projects/${selected}/events`);
-    source.addEventListener("progress", () => {
+    let source: EventSource | undefined;
+    const update = () => {
       api<Book>(`/projects/${selected}`)
         .then(setBook)
         .catch(() => {});
-    });
-    return () => source.close();
-  }, [selected, user]);
+    };
+    const watch = () => {
+      source?.close();
+      if (document.hidden) return;
+      update();
+      if (hasActiveJob) {
+        source = new EventSource(`/api/projects/${selected}/events`);
+        source.addEventListener("progress", update);
+      }
+    };
+    watch();
+    document.addEventListener("visibilitychange", watch);
+    return () => {
+      source?.close();
+      document.removeEventListener("visibilitychange", watch);
+    };
+  }, [selected, user, hasActiveJob]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 4500);
@@ -988,16 +1005,19 @@ function NewBook({
           rights_declaration: declaration,
         }),
       );
-      created(book.id);
-      if (source === "url")
-        await api(`/projects/${book.id}/source/url`, post({ url }));
-      else if (file) {
-        const body = new FormData();
-        body.append("file", file);
-        await api(`/projects/${book.id}/source/upload`, {
-          method: "POST",
-          body,
-        });
+      try {
+        if (source === "url")
+          await api(`/projects/${book.id}/source/url`, post({ url }));
+        else if (file) {
+          const body = new FormData();
+          body.append("file", file);
+          await api(`/projects/${book.id}/source/upload`, {
+            method: "POST",
+            body,
+          });
+        }
+      } finally {
+        created(book.id);
       }
     }, "Your book is ready for analysis.");
     setCreating(false);

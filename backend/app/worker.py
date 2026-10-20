@@ -116,7 +116,11 @@ def execute(job_id):
 
 
 def enqueue(job_id):
-    if settings().redis_url:
+    if settings().azure_queue_url:
+        from .azure_queue import enqueue_job
+
+        enqueue_job(job_id)
+    elif settings().redis_url:
         from redis import Redis
         from rq import Queue
 

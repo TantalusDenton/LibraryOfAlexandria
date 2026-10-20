@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
+    azure_storage_account_url: str = ""
+    azure_blob_container: str = "objects"
+    azure_queue_url: str = ""
+    azure_client_id: str = ""
+    registration_enabled: bool = True
     ai_mode: str = "offline"
     openai_api_key: str = ""
     text_model: str = "gpt-4.1-mini"
